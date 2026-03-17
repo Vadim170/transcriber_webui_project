@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Вход — Dual Transcriber</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body class="login-body">
+  <main class="login-card">
+    <h1>Dual Transcriber</h1>
+    <p class="muted">Введите пароль, чтобы открыть панель мониторинга.</p>
+    <form id="login-form">
+      <label>Пароль</label>
+      <input id="password" type="password" autocomplete="current-password" autofocus>
+      <button type="submit">Войти</button>
+      <div id="login-error" class="error"></div>
+    </form>
+  </main>
+  <script>
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const password = document.getElementById('password').value;
+      const res = await fetch('/api/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({password})});
+      const data = await res.json();
+      if (data.ok) location.href = '/';
+      else document.getElementById('login-error').textContent = data.error || 'Ошибка входа';
+    });
+  </script>
+</body>
+</html>

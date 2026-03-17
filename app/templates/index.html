@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dual Transcriber</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div>
+        <h1>Dual Transcriber</h1>
+        <p class="muted">Локальная веб-панель для мониторинга транскрибации</p>
+      </div>
+      <div class="top-actions">
+        <span id="server-status" class="pill">offline</span>
+        <button id="logout-btn" class="ghost">Выйти</button>
+      </div>
+    </header>
+
+    <section class="panel settings-panel">
+      <div class="panel-header">
+        <h2>Настройки</h2>
+      </div>
+      <div class="settings-grid">
+        <div>
+          <label>Микрофон</label>
+          <select id="mic-device"></select>
+        </div>
+        <div>
+          <label>Системный звук / BlackHole</label>
+          <select id="remote-device"></select>
+        </div>
+        <div>
+          <label>Модель</label>
+          <input id="model" type="text" placeholder="large-v3-turbo-q5_0 или /path/to/model.bin">
+        </div>
+        <div>
+          <label>Потоки</label>
+          <input id="threads" type="number" min="1" max="32" step="1">
+        </div>
+        <div class="full">
+          <label>Папка логов</label>
+          <input id="out-dir" type="text" placeholder="./transcripts">
+        </div>
+      </div>
+      <div class="button-row">
+        <button id="save-config-btn" class="ghost">Сохранить настройки</button>
+        <button id="start-btn">Запустить</button>
+        <button id="stop-btn" class="danger">Остановить</button>
+        <span id="action-result" class="muted"></span>
+      </div>
+    </section>
+
+    <section class="cards-grid">
+      <article class="panel compact">
+        <h3>Сессия</h3>
+        <div id="session-metrics" class="kv-grid"></div>
+      </article>
+      <article class="panel compact">
+        <h3>Система</h3>
+        <div id="system-metrics" class="kv-grid"></div>
+      </article>
+      <article class="panel compact">
+        <h3>Источник: микрофон</h3>
+        <div id="mic-metrics" class="kv-grid"></div>
+      </article>
+      <article class="panel compact">
+        <h3>Источник: system / BlackHole</h3>
+        <div id="remote-metrics" class="kv-grid"></div>
+      </article>
+    </section>
+
+    <section class="charts-grid">
+      <article class="panel">
+        <div class="panel-header row-between">
+          <h3>Слова по времени</h3>
+          <select id="range-words">
+            <option value="3600">1 час</option>
+            <option value="86400">24 часа</option>
+          </select>
+        </div>
+        <div id="chart-words" class="chart"></div>
+      </article>
+      <article class="panel">
+        <div class="panel-header row-between">
+          <h3>RTF по времени</h3>
+          <select id="range-rtf">
+            <option value="3600">1 час</option>
+            <option value="86400">24 часа</option>
+          </select>
+        </div>
+        <div id="chart-rtf" class="chart"></div>
+      </article>
+      <article class="panel">
+        <div class="panel-header row-between">
+          <h3>Оценка задержки</h3>
+          <select id="range-lag">
+            <option value="3600">1 час</option>
+            <option value="86400">24 часа</option>
+          </select>
+        </div>
+        <div id="chart-lag" class="chart"></div>
+      </article>
+      <article class="panel">
+        <div class="panel-header row-between">
+          <h3>Накопление слов</h3>
+          <select id="range-cum">
+            <option value="3600">1 час</option>
+            <option value="86400">24 часа</option>
+          </select>
+        </div>
+        <div id="chart-cumulative" class="chart"></div>
+      </article>
+    </section>
+
+    <section class="bottom-grid">
+      <article class="panel">
+        <h3>Языки</h3>
+        <div class="lang-columns">
+          <div>
+            <h4>Микрофон</h4>
+            <div id="langs-mic"></div>
+          </div>
+          <div>
+            <h4>Системный звук</h4>
+            <div id="langs-remote"></div>
+          </div>
+        </div>
+      </article>
+      <article class="panel">
+        <h3>Последние фразы</h3>
+        <div id="logs" class="logs"></div>
+      </article>
+    </section>
+  </div>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
