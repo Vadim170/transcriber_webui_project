@@ -9,6 +9,18 @@ function fmtBytes(bytes) {
   return `${n.toFixed(n >= 10 ? 0 : 1)} ${units[i]}`;
 }
 function fmtNum(v, digits=1) { return v == null ? '—' : Number(v).toFixed(digits); }
+function fmtPct(v) { return v == null ? '—' : `${Number(v).toFixed(v >= 10 ? 0 : 1)} %`; }
+function fmtChartNum(v) {
+  if (v == null || !Number.isFinite(Number(v))) return '—';
+  const n = Number(v);
+  const abs = Math.abs(n);
+  let digits = 0;
+  if (abs < 1) digits = 2;
+  else if (abs < 10) digits = 2;
+  else if (abs < 100) digits = 1;
+  const text = n.toFixed(digits);
+  return text.replace(/\.0+$/, '').replace(/(\.\d*[1-9])0+$/, '$1');
+}
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function statusClass(v) {
   if (v == null) return '';
@@ -43,30 +55,51 @@ function aggregate(items, rangeSec, bucketSec, valueFn) {
   }
   return buckets;
 }
+function getChartTicks(minY, maxY, count=4) {
+  if (minY === maxY) return [minY];
+  return Array.from({length: count}, (_, i) => maxY - ((maxY - minY) * i / (count - 1)));
+}
 function renderLineChart(target, seriesDefs, opts={}) {
-  const w = target.clientWidth || 500, h = 220, pad = 26;
+  const w = target.clientWidth || 500, h = 220;
+  const padL = 56, padR = 18, padT = 18, padB = 18;
   const allVals = seriesDefs.flatMap(s => s.values.map(v => v.y));
+  if (!allVals.length) {
+    target.innerHTML = '<div class="chart-empty muted">Пока нет данных</div>';
+    return;
+  }
   const maxY = Math.max(opts.minMaxY || 0, ...allVals, opts.forceMax ?? 0);
   const minY = opts.forceMin ?? Math.min(0, ...allVals);
   const ySpan = Math.max(1e-6, maxY - minY);
   const xMax = Math.max(1, ...seriesDefs.flatMap(s => s.values.map(v => v.x)));
+  const innerW = w - padL - padR;
+  const innerH = h - padT - padB;
+  const ticks = getChartTicks(minY, maxY, 4);
+  const formatValue = opts.valueFormatter || fmtChartNum;
   let svg = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">`;
   svg += `<rect x="0" y="0" width="${w}" height="${h}" fill="transparent"/>`;
-  for (let i=0;i<4;i++) {
-    const y = pad + ((h - 2*pad) * i / 3);
-    svg += `<line x1="${pad}" y1="${y}" x2="${w-pad}" y2="${y}" stroke="#263250" stroke-width="1"/>`;
+  svg += `<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${h - padB}" stroke="#31405f" stroke-width="1"/>`;
+  for (const tick of ticks) {
+    const y = padT + ((maxY - tick) / ySpan) * innerH;
+    svg += `<line x1="${padL}" y1="${y}" x2="${w-padR}" y2="${y}" stroke="#263250" stroke-width="1"/>`;
+    svg += `<text x="${padL - 8}" y="${y + 4}" fill="#97a3c6" font-size="10" text-anchor="end">${esc(formatValue(tick))}</text>`;
   }
   if (opts.forceMax != null && opts.forceMax >= 1 && minY <= 1 && maxY >= 1) {
-    const y = h - pad - ((1 - minY) / ySpan) * (h - 2*pad);
-    svg += `<line x1="${pad}" y1="${y}" x2="${w-pad}" y2="${y}" stroke="#f1c40f" stroke-width="1" stroke-dasharray="4 4"/>`;
+    const y = h - padB - ((1 - minY) / ySpan) * innerH;
+    svg += `<line x1="${padL}" y1="${y}" x2="${w-padR}" y2="${y}" stroke="#f1c40f" stroke-width="1" stroke-dasharray="4 4"/>`;
   }
   for (const s of seriesDefs) {
-    const pts = s.values.map(v => {
-      const x = pad + (v.x / xMax) * (w - 2*pad);
-      const y = h - pad - ((v.y - minY) / ySpan) * (h - 2*pad);
-      return `${x},${y}`;
-    }).join(' ');
+    const points = s.values.map(v => {
+      const x = padL + (v.x / xMax) * innerW;
+      const y = h - padB - ((v.y - minY) / ySpan) * innerH;
+      return {x, y, value: v.y};
+    });
+    const pts = points.map(p => `${p.x},${p.y}`).join(' ');
     svg += `<polyline fill="none" stroke="${s.color}" stroke-width="2.5" points="${pts}"/>`;
+    for (const p of points) {
+      const title = `${s.label || 'series'}: ${formatValue(p.value)}`;
+      svg += `<circle cx="${p.x}" cy="${p.y}" r="3.5" fill="${s.color}" class="chart-point">`
+        + `<title>${esc(title)}</title></circle>`;
+    }
   }
   svg += `</svg>`;
   target.innerHTML = svg;
@@ -75,8 +108,8 @@ function renderWordsChart(state, rangeSec, el) {
   const bucket = rangeSec <= 3600 ? 60 : 1800;
   const rows = aggregate(state.history, rangeSec, bucket, x => x.words);
   const series = [
-    {color:'#7c9cff', values: rows.map((r,i)=>({x:i,y:r.mic}))},
-    {color:'#2ecc71', values: rows.map((r,i)=>({x:i,y:r.remote}))},
+    {label:'mic', color:'#7c9cff', values: rows.map((r,i)=>({x:i,y:r.mic}))},
+    {label:'remote', color:'#2ecc71', values: rows.map((r,i)=>({x:i,y:r.remote}))},
   ];
   renderLineChart(el, series, {forceMin:0});
 }
@@ -84,16 +117,16 @@ function renderRTFChart(state, rangeSec, el) {
   const items = timeFilter(state.processing_history, rangeSec);
   const normalize = (role) => items.filter(x => x.role === role).map((x,i)=>({x:i, y:x.rtf || 0}));
   renderLineChart(el, [
-    {color:'#7c9cff', values: normalize('mic')},
-    {color:'#2ecc71', values: normalize('remote')},
+    {label:'mic', color:'#7c9cff', values: normalize('mic')},
+    {label:'remote', color:'#2ecc71', values: normalize('remote')},
   ], {forceMin:0, forceMax:1.2});
 }
 function renderLagChart(state, rangeSec, el) {
   const items = timeFilter(state.processing_history, rangeSec);
   const normalize = (role) => items.filter(x => x.role === role).map((x,i)=>({x:i, y:x.lag || 0}));
   renderLineChart(el, [
-    {color:'#7c9cff', values: normalize('mic')},
-    {color:'#2ecc71', values: normalize('remote')},
+    {label:'mic', color:'#7c9cff', values: normalize('mic')},
+    {label:'remote', color:'#2ecc71', values: normalize('remote')},
   ], {forceMin:0});
 }
 function renderCumChart(state, rangeSec, el) {
@@ -103,8 +136,8 @@ function renderCumChart(state, rangeSec, el) {
   const micVals = [], remoteVals = [];
   rows.forEach((r, i) => { mic += r.mic; remote += r.remote; micVals.push({x:i,y:mic}); remoteVals.push({x:i,y:remote}); });
   renderLineChart(el, [
-    {color:'#7c9cff', values: micVals},
-    {color:'#2ecc71', values: remoteVals},
+    {label:'mic', color:'#7c9cff', values: micVals},
+    {label:'remote', color:'#2ecc71', values: remoteVals},
   ], {forceMin:0});
 }
 function renderLangs(target, data) {
@@ -120,8 +153,114 @@ function renderLogs(target, logs) {
       <div class="log-text">${esc(item.text)}</div>
     </div>`).join('');
 }
+function modelStatusText(m) {
+  if (m.loading) return `загрузка ${fmtPct(m.progress_pct)}`;
+  if (m.installed) return 'локально';
+  if (m.last_error) return `ошибка: ${m.last_error}`;
+  return 'не загружена';
+}
+function renderModels(groups) {
+  const target = $('#models-list');
+  const summary = $('#models-summary');
+  const all = groups.flatMap(g => g.models || []);
+  const installed = all.filter(m => m.installed).length;
+  const loading = all.filter(m => m.loading).length;
+  summary.textContent = `${installed}/${all.length} локально, ${loading} загружается`;
+  if (!all.length) {
+    target.innerHTML = '<div class="muted">Пока нет моделей</div>';
+    return;
+  }
+  target.innerHTML = groups.map(group => `
+    <div class="log-item">
+      <div class="log-head"><strong>${esc(group.group)}</strong></div>
+      ${(group.models || []).map(m => {
+        const progress = Math.max(0, Math.min(100, Number(m.progress_pct || 0)));
+        const cacheInfo = m.total_bytes ? `${fmtBytes(m.downloaded_bytes)} / ${fmtBytes(m.total_bytes)}` : fmtBytes(m.downloaded_bytes);
+        const preloadDisabled = m.loading || m.available === false;
+        const deleteDisabled = m.loading || !m.installed;
+        return `
+          <div class="log-item" style="margin-top:8px;">
+            <div class="log-head">
+              <span>${esc(m.label || m.id)}</span>
+              <span>${esc(m.backend || '')}</span>
+              <span>${esc(modelStatusText(m))}</span>
+            </div>
+            <div class="muted" style="margin-bottom:4px;">${esc(m.note || '')}</div>
+            ${m.available === false && m.error ? `<div class="muted bad" style="margin-bottom:4px;">${esc(m.error)}</div>` : ''}
+            <div class="muted" style="margin-bottom:6px;">Кэш: ${esc(cacheInfo)}${m.cache_path ? ` · ${esc(m.cache_path)}` : ''}</div>
+            <div style="height:8px; background:#263250; border-radius:999px; overflow:hidden; margin-bottom:8px;">
+              <div style="height:100%; width:${progress}%; background:${m.loading ? '#f1c40f' : (m.installed ? '#2ecc71' : '#7c9cff')};"></div>
+            </div>
+            <div class="button-row">
+              <button data-model-action="preload" data-model-id="${esc(m.id)}" ${preloadDisabled ? 'disabled' : ''}>Загрузить</button>
+              <button class="ghost" data-model-action="delete" data-model-id="${esc(m.id)}" ${deleteDisabled ? 'disabled' : ''}>Удалить</button>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `).join('');
+}
+async function refreshModels() {
+  const data = await api('/api/models/status');
+  renderModels(data.groups || []);
+}
+function setupModelSelector(groups, currentModel) {
+  const sel = $('#model-select');
+  const custom = $('#model-custom');
+  const hidden = $('#model');
+  const quant = $('#quantization');
+  const quantMap = new Map();
+  let html = '';
+  for (const g of groups) {
+    html += `<optgroup label="${esc(g.group)}">`;
+    for (const m of g.models) {
+      const extraParts = [];
+      if (m.note) extraParts.push(m.note);
+      if (m.available === false && m.error) extraParts.push(`недоступно: ${m.error}`);
+      const extra = extraParts.length ? ` — ${extraParts.join(' · ')}` : '';
+      quantMap.set(m.id, m.quantization || ['none']);
+      html += `<option value="${esc(m.id)}" ${m.available === false ? 'disabled' : ''}>${esc(m.label || m.id)}${extra}</option>`;
+    }
+    html += '</optgroup>';
+  }
+  html += '<optgroup label="Другое"><option value="__custom__">Свой путь к .bin файлу…</option></optgroup>';
+  sel.innerHTML = html;
+
+  function syncHidden() {
+    if (sel.value === '__custom__') {
+      custom.style.display = '';
+      hidden.value = custom.value.trim();
+      Array.from(quant.options).forEach(opt => { opt.disabled = false; });
+    } else {
+      custom.style.display = 'none';
+      hidden.value = sel.value;
+      const supported = quantMap.get(sel.value) || ['none'];
+      Array.from(quant.options).forEach(opt => {
+        opt.disabled = !supported.includes(opt.value);
+      });
+      if (!supported.includes(quant.value)) {
+        quant.value = supported[0] || 'none';
+      }
+    }
+  }
+  sel.addEventListener('change', syncHidden);
+  custom.addEventListener('input', syncHidden);
+
+  const allIds = groups.flatMap(g => g.models.map(m => m.id));
+  if (currentModel && allIds.includes(currentModel)) {
+    sel.value = currentModel;
+  } else if (currentModel) {
+    sel.value = '__custom__';
+    custom.value = currentModel;
+  }
+  syncHidden();
+}
+
 async function loadConfigAndDevices() {
-  const [cfgRes, devRes] = await Promise.all([api('/api/config'), api('/api/devices')]);
+  const [cfgRes, devRes, modRes] = await Promise.all([
+    api('/api/config'), api('/api/devices'), api('/api/models'),
+  ]);
   const cfg = cfgRes.config, devices = devRes.devices;
   const fill = (sel, selected) => {
     const options = ['<option value="">— не использовать —</option>'].concat(devices.map(d => `<option value="${d.id}">${d.id}: ${esc(d.name)} (${d.default_samplerate} Hz)</option>`));
@@ -130,9 +269,15 @@ async function loadConfigAndDevices() {
   };
   fill($('#mic-device'), cfg.mic_device);
   fill($('#remote-device'), cfg.remote_device);
-  $('#model').value = cfg.model || '';
+  setupModelSelector(modRes.groups || [], cfg.model || '');
+  renderModels(modRes.groups || []);
   $('#threads').value = cfg.threads || 6;
+  $('#quantization').value = cfg.quantization || 'none';
   $('#out-dir').value = cfg.out_dir || './transcripts';
+  $('#full-audio-enabled').value = String(cfg.full_audio_enabled !== false);
+  $('#full-audio-retention-days').value = cfg.full_audio_retention_days || 1;
+  $('#full-audio-dir').value = cfg.full_audio_dir || './audio_archive';
+  $('#model-select').dispatchEvent(new Event('change'));
 }
 function currentForm() {
   const parseId = (v) => v === '' ? null : Number(v);
@@ -140,12 +285,17 @@ function currentForm() {
     mic_device: parseId($('#mic-device').value),
     remote_device: parseId($('#remote-device').value),
     model: $('#model').value.trim(),
+    quantization: $('#quantization').value,
     threads: Number($('#threads').value || 6),
     out_dir: $('#out-dir').value.trim(),
+    full_audio_enabled: $('#full-audio-enabled').value === 'true',
+    full_audio_retention_days: Math.max(1, Number($('#full-audio-retention-days').value || 1)),
+    full_audio_dir: $('#full-audio-dir').value.trim() || './audio_archive',
   };
 }
 async function refreshState() {
   try {
+    await refreshModels();
     const {state} = await api('/api/state');
     const session = state.session, system = state.system, mic = state.sources.mic, remote = state.sources.remote;
     $('#server-status').textContent = session.loading ? 'loading' : (session.running ? 'running' : 'stopped');
@@ -153,6 +303,10 @@ async function refreshState() {
       ['Запущено', session.running ? 'да' : 'нет'],
       ['Загрузка модели', session.loading ? 'да' : 'нет'],
       ['Модель загружена', session.model_loaded ? 'да' : 'нет'],
+      ['Архив аудио', state.archive?.enabled ? 'да' : 'нет'],
+      ['Хранить суток', state.archive?.retention_days ?? '—'],
+      ['Архив mic.wav', fmtBytes(state.archive?.files?.mic)],
+      ['Архив remote.wav', fmtBytes(state.archive?.files?.remote)],
       ['Фраз всего', session['фраз_всего']],
       ['Слов всего', session['слов_всего']],
       ['Слов/час mic', session['слов_за_час'].mic],
@@ -203,6 +357,30 @@ async function refreshState() {
 }
 async function boot() {
   await loadConfigAndDevices();
+  $('#models-list').onclick = async (event) => {
+    const btn = event.target.closest('button[data-model-action]');
+    if (!btn) return;
+    const model = btn.dataset.modelId;
+    const action = btn.dataset.modelAction;
+    try {
+      if (action === 'preload') {
+        const data = await api('/api/models/preload', {
+          method:'POST',
+          body:JSON.stringify({model, quantization: $('#quantization').value}),
+        });
+        $('#action-result').textContent = data.message || 'Загрузка модели запущена';
+      } else if (action === 'delete') {
+        const data = await api('/api/models/delete', {
+          method:'POST',
+          body:JSON.stringify({model}),
+        });
+        $('#action-result').textContent = data.message || 'Модель удалена';
+      }
+      await refreshModels();
+    } catch (e) {
+      $('#action-result').textContent = e.message;
+    }
+  };
   $('#save-config-btn').onclick = async () => {
     try { await api('/api/config', {method:'POST', body:JSON.stringify(currentForm())}); $('#action-result').textContent = 'Настройки сохранены'; }
     catch (e) { $('#action-result').textContent = e.message; }

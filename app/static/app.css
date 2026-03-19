@@ -43,6 +43,9 @@ button.danger { background: var(--red); color:#220b0b; }
 .row-between { gap:12px; }
 .chart { min-height: 220px; background:#0d1425; border:1px solid var(--line); border-radius:12px; padding:8px; overflow:hidden; }
 .chart svg { width:100%; height:220px; display:block; }
+.chart-empty { height:220px; display:grid; place-items:center; font-size:13px; }
+.chart-point { cursor:pointer; transition: r .12s ease, opacity .12s ease; }
+.chart-point:hover { r: 5; opacity: 1; }
 .logs { max-height: 380px; overflow:auto; display:flex; flex-direction:column; gap:10px; margin-top:12px; }
 .log-item { background:#0d1425; border:1px solid var(--line); border-radius:12px; padding:10px 12px; }
 .log-head { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:6px; color:var(--muted); font-size:12px; }
@@ -56,6 +59,38 @@ button.danger { background: var(--red); color:#220b0b; }
 .good { color: var(--green); }
 .warn { color: var(--yellow); }
 .bad { color: var(--red); }
+/* ── History page ─────────────────────────────────────────────── */
+.ghost-link { color: var(--text); text-decoration:none; padding:10px 12px; border:1px solid var(--line); border-radius:12px; font:inherit; background:transparent; cursor:pointer; }
+.ghost-link:hover { background: var(--panel-2); }
+.history-overview-panel { margin-bottom:16px; }
+.overview-chart { min-height:160px; background:#0d1425; border:1px solid var(--line); border-radius:12px; padding:8px; margin-top:12px; overflow:hidden; position:relative; }
+.overview-chart svg { width:100%; height:160px; display:block; }
+.overview-hint { font-size:12px; margin-top:6px; text-align:center; }
+.legend-row { display:flex; align-items:center; gap:8px; }
+.legend-dot { display:inline-block; width:10px; height:10px; border-radius:50%; }
+.history-controls-panel { margin-bottom:16px; }
+.range-controls { margin-top:12px; display:flex; flex-direction:column; gap:14px; }
+.range-inputs { display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap; }
+.range-inputs > div { flex:1; min-width:180px; }
+.range-sep { align-self:center; padding-bottom:6px; font-size:20px; }
+.preset-row { display:flex; gap:8px; flex-wrap:wrap; }
+.preset-btn { width:auto !important; padding:8px 14px; min-width:0 !important; font-size:13px; }
+.load-row { display:flex; align-items:center; gap:12px; }
+.load-row button { width:auto; min-width:140px; }
+.retranscribe-panel { background:#0d1425; border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+.retranscribe-head, .retranscribe-meta { display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap; }
+.retranscribe-progress { height:10px; background:#18213a; border:1px solid var(--line); border-radius:999px; overflow:hidden; margin:10px 0 8px; }
+.retranscribe-progress-bar { height:100%; width:0%; background:var(--accent); transition:width .2s ease; }
+.history-results-panel { margin-bottom:16px; }
+.history-results-list { display:flex; flex-direction:column; gap:10px; margin-top:14px; max-height:600px; overflow-y:auto; }
+.history-item { background:#0d1425; border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+.history-item-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px; font-size:12px; }
+.history-item-text { line-height:1.5; }
+.role-pill { padding:3px 9px; border-radius:999px; font-size:11px; font-weight:600; }
+.role-mic { background: rgba(124,156,255,.18); color:#7c9cff; border:1px solid rgba(124,156,255,.35); }
+.role-remote { background: rgba(46,204,113,.15); color:#2ecc71; border:1px solid rgba(46,204,113,.3); }
+.lang-badge { padding:2px 7px; border-radius:6px; background:#1a2540; border:1px solid var(--line); color:var(--muted); font-size:11px; }
+
 @media (max-width: 1100px) {
   .cards-grid, .charts-grid, .bottom-grid { grid-template-columns: 1fr; }
   .settings-grid { grid-template-columns: 1fr 1fr; }
@@ -63,4 +98,7 @@ button.danger { background: var(--red); color:#220b0b; }
 @media (max-width: 720px) {
   .settings-grid, .kv-grid, .lang-columns { grid-template-columns: 1fr; }
   .topbar { flex-direction:column; }
+  .range-inputs { flex-direction:column; }
+  .range-sep { display:none; }
+  .load-row, .retranscribe-head, .retranscribe-meta { flex-direction:column; align-items:flex-start; }
 }

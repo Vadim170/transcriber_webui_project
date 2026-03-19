@@ -15,6 +15,7 @@
       </div>
       <div class="top-actions">
         <span id="server-status" class="pill">offline</span>
+        <a href="/history" class="ghost-link">История</a>
         <button id="logout-btn" class="ghost">Выйти</button>
       </div>
     </header>
@@ -34,15 +35,40 @@
         </div>
         <div>
           <label>Модель</label>
-          <input id="model" type="text" placeholder="large-v3-turbo-q5_0 или /path/to/model.bin">
+          <select id="model-select"></select>
+          <input id="model-custom" type="text" placeholder="/path/to/model.bin" style="display:none; margin-top:4px;">
+          <input id="model" type="hidden">
         </div>
         <div>
           <label>Потоки</label>
           <input id="threads" type="number" min="1" max="32" step="1">
         </div>
+        <div>
+          <label>Квантизация</label>
+          <select id="quantization">
+            <option value="none">Без квантизации</option>
+            <option value="4bit">4-bit</option>
+            <option value="8bit">8-bit</option>
+          </select>
+        </div>
         <div class="full">
           <label>Папка логов</label>
           <input id="out-dir" type="text" placeholder="./transcripts">
+        </div>
+        <div>
+          <label>Полное аудио</label>
+          <select id="full-audio-enabled">
+            <option value="true">Включено</option>
+            <option value="false">Выключено</option>
+          </select>
+        </div>
+        <div>
+          <label>Хранить, суток</label>
+          <input id="full-audio-retention-days" type="number" min="1" step="1">
+        </div>
+        <div class="full">
+          <label>Папка архива аудио</label>
+          <input id="full-audio-dir" type="text" placeholder="./audio_archive">
         </div>
       </div>
       <div class="button-row">
@@ -51,6 +77,14 @@
         <button id="stop-btn" class="danger">Остановить</button>
         <span id="action-result" class="muted"></span>
       </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header row-between">
+        <h2>Модели</h2>
+        <span id="models-summary" class="muted"></span>
+      </div>
+      <div id="models-list" class="logs"></div>
     </section>
 
     <section class="cards-grid">
