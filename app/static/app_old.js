@@ -42,6 +42,19 @@ function timeFilter(items, seconds) {
   const now = Date.now() / 1000;
   return items.filter(x => x.ts >= now - Number(seconds));
 }
+function aggregate(items, rangeSec, bucketSec, valueFn) {
+  const now = Date.now() / 1000;
+  const start = now - rangeSec;
+  const buckets = [];
+  for (let t = start; t <= now; t += bucketSec) buckets.push({t, mic:0, remote:0});
+  for (const item of items) {
+    if (item.ts < start) continue;
+    const idx = Math.min(buckets.length - 1, Math.max(0, Math.floor((item.ts - start) / bucketSec)));
+    const val = valueFn(item);
+    buckets[idx][item.role] += val;
+  }
+  return buckets;
+}
 function getChartTicks(minY, maxY, count=4) {
   if (minY === maxY) return [minY];
   return Array.from({length: count}, (_, i) => maxY - ((maxY - minY) * i / (count - 1)));
@@ -91,6 +104,15 @@ function renderLineChart(target, seriesDefs, opts={}) {
   svg += `</svg>`;
   target.innerHTML = svg;
 }
+function renderWordsChart(state, rangeSec, el) {
+  const bucket = rangeSec <= 3600 ? 60 : 1800;
+  const rows = aggregate(state.history, rangeSec, bucket, x => x.words);
+  const series = [
+    {label:'mic', color:'#7c9cff', values: rows.map((r,i)=>({x:i,y:r.mic}))},
+    {label:'remote', color:'#2ecc71', values: rows.map((r,i)=>({x:i,y:r.remote}))},
+  ];
+  renderLineChart(el, series, {forceMin:0});
+}
 function renderRTFChart(state, rangeSec, el) {
   const items = timeFilter(state.processing_history, rangeSec);
   const normalize = (role) => items.filter(x => x.role === role).map((x,i)=>({x:i, y:x.rtf || 0}));
@@ -107,29 +129,29 @@ function renderLagChart(state, rangeSec, el) {
     {label:'remote', color:'#2ecc71', values: normalize('remote')},
   ], {forceMin:0});
 }
+function renderCumChart(state, rangeSec, el) {
+  const bucket = rangeSec <= 3600 ? 60 : 1800;
+  const rows = aggregate(state.history, rangeSec, bucket, x => x.words);
+  let mic = 0, remote = 0;
+  const micVals = [], remoteVals = [];
+  rows.forEach((r, i) => { mic += r.mic; remote += r.remote; micVals.push({x:i,y:mic}); remoteVals.push({x:i,y:remote}); });
+  renderLineChart(el, [
+    {label:'mic', color:'#7c9cff', values: micVals},
+    {label:'remote', color:'#2ecc71', values: remoteVals},
+  ], {forceMin:0});
+}
 function renderLangs(target, data) {
   const entries = Object.entries(data || {});
   if (!entries.length) { target.innerHTML = '<div class="muted">Пока нет данных</div>'; return; }
   target.innerHTML = entries.map(([k,v]) => `<div class="lang-tag"><span>${esc(k)}</span><strong>${esc(v)}</strong></div>`).join('');
 }
-function fmtIntervalDuration(sec) {
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  return `${m} мин ${s} с`;
-}
-function renderLastInterval(target, lastInterval) {
-  if (!lastInterval || (!lastInterval.mic_text && !lastInterval.remote_text)) {
-    target.innerHTML = '<div class="muted">Пока нет интервалов</div>';
-    return;
-  }
-  let html = '';
-  if (lastInterval.mic_text) {
-    html += `<div class="log-item"><div class="log-head"><span class="role-pill role-mic">mic</span></div><div class="log-text">${esc(lastInterval.mic_text)}</div></div>`;
-  }
-  if (lastInterval.remote_text) {
-    html += `<div class="log-item"><div class="log-head"><span class="role-pill role-remote">remote</span></div><div class="log-text">${esc(lastInterval.remote_text)}</div></div>`;
-  }
-  target.innerHTML = html;
+function renderLogs(target, logs) {
+  if (!logs.length) { target.innerHTML = '<div class="muted">Пока нет фраз</div>'; return; }
+  target.innerHTML = logs.slice().reverse().map(item => `
+    <div class="log-item">
+      <div class="log-head"><span>${esc(item.at)}</span><span>${esc(item.role)}</span><span>${esc(item.language)}</span><span>${item.words} слов</span></div>
+      <div class="log-text">${esc(item.text)}</div>
+    </div>`).join('');
 }
 function modelStatusText(m) {
   if (m.loading) return `загрузка ${fmtPct(m.progress_pct)}`;
@@ -252,9 +274,9 @@ async function loadConfigAndDevices() {
   $('#threads').value = cfg.threads || 6;
   $('#quantization').value = cfg.quantization || 'none';
   $('#out-dir').value = cfg.out_dir || './transcripts';
-  $('#min-interval-s').value = cfg.min_interval_s || 300;
-  $('#max-interval-s').value = cfg.max_interval_s || 600;
-  $('#silence-cut-ms').value = cfg.silence_cut_ms || 2000;
+  $('#full-audio-enabled').value = String(cfg.full_audio_enabled !== false);
+  $('#full-audio-retention-days').value = cfg.full_audio_retention_days || 1;
+  $('#full-audio-dir').value = cfg.full_audio_dir || './audio_archive';
   $('#model-select').dispatchEvent(new Event('change'));
 }
 function currentForm() {
@@ -266,33 +288,34 @@ function currentForm() {
     quantization: $('#quantization').value,
     threads: Number($('#threads').value || 6),
     out_dir: $('#out-dir').value.trim(),
-    min_interval_s: Number($('#min-interval-s').value || 300),
-    max_interval_s: Number($('#max-interval-s').value || 600),
-    silence_cut_ms: Number($('#silence-cut-ms').value || 2000),
+    full_audio_enabled: $('#full-audio-enabled').value === 'true',
+    full_audio_retention_days: Math.max(1, Number($('#full-audio-retention-days').value || 1)),
+    full_audio_dir: $('#full-audio-dir').value.trim() || './audio_archive',
   };
 }
 async function refreshState() {
   try {
     await refreshModels();
     const {state} = await api('/api/state');
-    const sess = state.session, system = state.system, mic = state.sources.mic, remote = state.sources.remote;
-    const ci = state.current_interval;
-    $('#server-status').textContent = sess.loading ? 'loading' : (sess.running ? 'running' : 'stopped');
-
-    const intervalStatus = ci
-      ? `Запись: ${fmtIntervalDuration(ci.elapsed_s)}`
-      : '—';
-
+    const session = state.session, system = state.system, mic = state.sources.mic, remote = state.sources.remote;
+    $('#server-status').textContent = session.loading ? 'loading' : (session.running ? 'running' : 'stopped');
     kv($('#session-metrics'), [
-      ['Запущено', sess.running ? 'да' : 'нет'],
-      ['Загрузка модели', sess.loading ? 'да' : 'нет'],
-      ['Модель загружена', sess.model_loaded ? 'да' : 'нет'],
-      ['Текущий интервал', intervalStatus],
-      ['Интервалов всего', sess.total_intervals],
-      ['Слов всего', sess.total_words],
-      ['Последняя запись', sess.last_write_at],
-      ['intervals.jsonl', fmtBytes(sess.intervals_file_size)],
-      ['Ошибка', sess.server_error || '—', sess.server_error ? 'bad' : '']
+      ['Запущено', session.running ? 'да' : 'нет'],
+      ['Загрузка модели', session.loading ? 'да' : 'нет'],
+      ['Модель загружена', session.model_loaded ? 'да' : 'нет'],
+      ['Архив аудио', state.archive?.enabled ? 'да' : 'нет'],
+      ['Хранить суток', state.archive?.retention_days ?? '—'],
+      ['Архив mic.wav', fmtBytes(state.archive?.files?.mic)],
+      ['Архив remote.wav', fmtBytes(state.archive?.files?.remote)],
+      ['Фраз всего', session.total_utterances],
+      ['Слов всего', session.total_words],
+      ['Слов/час mic', session.words_per_hour.mic],
+      ['Слов/час remote', session.words_per_hour.remote],
+      ['Последняя запись', session.last_write_at],
+      ['mic.jsonl', fmtBytes(session.log_sizes.mic)],
+      ['remote.jsonl', fmtBytes(session.log_sizes.remote)],
+      ['combined.jsonl', fmtBytes(session.log_sizes.combined)],
+      ['Ошибка', session.server_error || '—', session.server_error ? 'bad' : '']
     ]);
     kv($('#system-metrics'), [
       ['CPU системы', system.cpu_percent == null ? '—' : `${fmtNum(system.cpu_percent)} %`],
@@ -307,22 +330,27 @@ async function refreshState() {
       ['Статус', src.status || '—'],
       ['Сейчас распознаёт', src.busy ? 'да' : 'нет'],
       ['Очередь', src.queue_size],
+      ['Буфер, мс', fmtNum(src.current_buffer_ms)],
       ['Последний аудиокусок, с', fmtNum(src.last_audio_sec, 2)],
       ['Последняя обработка, с', fmtNum(src.last_processing_sec, 2)],
       ['RTF', fmtNum(src.last_rtf, 2), statusClass(src.last_rtf)],
       ['Оценка задержки, с', fmtNum(src.lag_estimate_sec, 2), statusClass(src.lag_estimate_sec > 1 ? 2 : 0)],
       ['Потерянные чанки', src.dropped_chunks],
+      ['Фраз', src.utterances],
       ['Слов', src.words],
+      ['Последний язык', src.last_language || '—'],
       ['Последняя запись', src.last_commit_at || '—'],
       ['Ошибка', src.last_error || '—', src.last_error ? 'bad' : ''],
     ];
     kv($('#mic-metrics'), sourceItems(mic));
     kv($('#remote-metrics'), sourceItems(remote));
-    renderLangs($('#langs-mic'), {});
-    renderLangs($('#langs-remote'), {});
-    renderLastInterval($('#last-interval'), state.last_interval);
+    renderLangs($('#langs-mic'), state.languages.mic);
+    renderLangs($('#langs-remote'), state.languages.remote);
+    renderLogs($('#logs'), state.logs || []);
+    renderWordsChart(state, Number($('#range-words').value), $('#chart-words'));
     renderRTFChart(state, Number($('#range-rtf').value), $('#chart-rtf'));
     renderLagChart(state, Number($('#range-lag').value), $('#chart-lag'));
+    renderCumChart(state, Number($('#range-cum').value), $('#chart-cumulative'));
   } catch (e) {
     $('#server-status').textContent = 'error';
   }

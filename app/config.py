@@ -15,17 +15,18 @@ DEFAULT_CONFIG = {
     "threads": 6,
     "out_dir": "./transcripts",
     "language": "auto",
-    "vad_aggressiveness": 1,
-    "preroll_ms": 300,
-    "silence_to_commit_ms": 450,
-    "min_speech_ms": 80,
-    "max_utterance_ms": 8000,
-    "min_rms_utterance": 0.003,
-    "min_rms_frame_fallback": 0.008,
+    "min_interval_s": 300,
+    "max_interval_s": 600,
+    "silence_cut_ms": 2000,
     "audio_queue_size": 2048,
-    "full_audio_enabled": True,
-    "full_audio_dir": "./audio_archive",
-    "full_audio_retention_days": 1,
+}
+
+# Keys removed during migration from old config format
+_OLD_KEYS_TO_REMOVE = {
+    "vad_aggressiveness", "preroll_ms", "silence_to_commit_ms",
+    "min_speech_ms", "max_utterance_ms", "min_rms_utterance",
+    "min_rms_frame_fallback", "full_audio_enabled", "full_audio_dir",
+    "full_audio_retention_days",
 }
 
 WHISPER_CPP_MODELS = [
@@ -54,7 +55,21 @@ def load_or_create_config(project_root: Path) -> dict:
 
     if config_path.exists():
         data = json.loads(config_path.read_text(encoding="utf-8"))
+        # Migrate: remove old keys that no longer exist
+        migrated = False
+        for old_key in _OLD_KEYS_TO_REMOVE:
+            if old_key in data:
+                del data[old_key]
+                migrated = True
+        # Ensure new defaults are present
+        for key, default_val in DEFAULT_CONFIG.items():
+            if key not in data:
+                data[key] = default_val
+                migrated = True
         cfg.update(data)
+        if migrated:
+            import logging
+            logging.getLogger(__name__).info("Config migrated: removed old keys, added new interval defaults.")
 
     if not cfg.get("port"):
         cfg["port"] = find_free_port(cfg["host"])

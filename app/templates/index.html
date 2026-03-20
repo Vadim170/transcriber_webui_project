@@ -56,19 +56,16 @@
           <input id="out-dir" type="text" placeholder="./transcripts">
         </div>
         <div>
-          <label>Полное аудио</label>
-          <select id="full-audio-enabled">
-            <option value="true">Включено</option>
-            <option value="false">Выключено</option>
-          </select>
+          <label>Мин. интервал (сек)</label>
+          <input id="min-interval-s" type="number" min="10" step="10" value="300">
         </div>
         <div>
-          <label>Хранить, суток</label>
-          <input id="full-audio-retention-days" type="number" min="1" step="1">
+          <label>Макс. интервал (сек)</label>
+          <input id="max-interval-s" type="number" min="30" step="10" value="600">
         </div>
-        <div class="full">
-          <label>Папка архива аудио</label>
-          <input id="full-audio-dir" type="text" placeholder="./audio_archive">
+        <div>
+          <label>Тишина для разреза (мс)</label>
+          <input id="silence-cut-ms" type="number" min="200" step="100" value="2000">
         </div>
       </div>
       <div class="button-row">
@@ -109,16 +106,6 @@
     <section class="charts-grid">
       <article class="panel">
         <div class="panel-header row-between">
-          <h3>Слова по времени</h3>
-          <select id="range-words">
-            <option value="3600">1 час</option>
-            <option value="86400">24 часа</option>
-          </select>
-        </div>
-        <div id="chart-words" class="chart"></div>
-      </article>
-      <article class="panel">
-        <div class="panel-header row-between">
           <h3>RTF по времени</h3>
           <select id="range-rtf">
             <option value="3600">1 час</option>
@@ -137,16 +124,6 @@
         </div>
         <div id="chart-lag" class="chart"></div>
       </article>
-      <article class="panel">
-        <div class="panel-header row-between">
-          <h3>Накопление слов</h3>
-          <select id="range-cum">
-            <option value="3600">1 час</option>
-            <option value="86400">24 часа</option>
-          </select>
-        </div>
-        <div id="chart-cumulative" class="chart"></div>
-      </article>
     </section>
 
     <section class="bottom-grid">
@@ -164,8 +141,10 @@
         </div>
       </article>
       <article class="panel">
-        <h3>Последние фразы</h3>
-        <div id="logs" class="logs"></div>
+        <h3>Последний интервал</h3>
+        <div id="last-interval" class="logs">
+          <div class="muted">Пока нет интервалов</div>
+        </div>
       </article>
     </section>
   </div>

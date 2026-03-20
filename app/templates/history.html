@@ -10,8 +10,8 @@
   <div class="shell">
     <header class="topbar">
       <div>
-        <h1>История combined</h1>
-        <p class="muted">Просмотр объединённых фраз за произвольный период</p>
+        <h1>История интервалов</h1>
+        <p class="muted">Просмотр транскрибированных интервалов за произвольный период</p>
       </div>
       <div class="top-actions">
         <a href="/" class="ghost-link">← Мониторинг</a>
@@ -19,33 +19,19 @@
       </div>
     </header>
 
-    <!-- Overview chart -->
+    <!-- Timeline chart -->
     <section class="panel history-overview-panel">
       <div class="panel-header row-between">
-        <h2>Обзор за последние 24 часа</h2>
+        <h2>Таймлайн интервалов</h2>
         <div class="legend-row">
-          <span class="legend-dot" style="background:#7c9cff"></span><span class="muted">mic</span>
-          <span class="legend-dot" style="background:#2ecc71"></span><span class="muted">remote</span>
+          <span class="legend-dot" style="background:#7c9cff"></span><span class="muted">транскрибировано</span>
+          <span class="legend-dot" style="background:#f1c40f"></span><span class="muted">запись</span>
         </div>
       </div>
-      <div id="overview-chart" class="overview-chart">
+      <div id="timeline-chart" class="overview-chart">
         <div class="muted" style="text-align:center;padding:40px 0">Загрузка…</div>
       </div>
-      <div class="overview-hint muted">Перетащите по графику для выбора диапазона</div>
-    </section>
-
-    <section class="panel history-overview-panel">
-      <div class="panel-header row-between">
-        <h2>Полное аудио за последние 24 часа</h2>
-        <div class="legend-row">
-          <span class="legend-dot" style="background:#7c9cff"></span><span class="muted">mic</span>
-          <span class="legend-dot" style="background:#2ecc71"></span><span class="muted">remote</span>
-        </div>
-      </div>
-      <div id="audio-overview-chart" class="overview-chart">
-        <div class="muted" style="text-align:center;padding:40px 0">Загрузка…</div>
-      </div>
-      <div class="overview-hint muted">Показывает интервалы, за которые доступна полная запись</div>
+      <div class="overview-hint muted">Перетащите по таймлайну для выбора диапазона · Нажмите на интервал для просмотра</div>
     </section>
 
     <!-- Range controls -->
@@ -75,29 +61,6 @@
           <button id="load-btn">Загрузить</button>
           <span id="range-status" class="muted"></span>
         </div>
-        <div class="load-row">
-          <button id="download-mic-btn" class="ghost">Скачать mic</button>
-          <button id="download-remote-btn" class="ghost">Скачать remote</button>
-          <span id="download-status" class="muted"></span>
-        </div>
-        <div class="load-row">
-          <button id="retranscribe-btn">Ретранскрибировать интервал</button>
-          <button id="download-retranscribe-json-btn" class="ghost" disabled>JSON результата</button>
-          <button id="download-retranscribe-txt-btn" class="ghost" disabled>TXT результата</button>
-        </div>
-        <div id="retranscribe-panel" class="retranscribe-panel" style="display:none">
-          <div class="retranscribe-head">
-            <strong>Повторная транскрибация</strong>
-            <span id="retranscribe-phase" class="muted">Подготовка…</span>
-          </div>
-          <div class="retranscribe-progress">
-            <div id="retranscribe-progress-bar" class="retranscribe-progress-bar"></div>
-          </div>
-          <div class="retranscribe-meta">
-            <span id="retranscribe-progress-text" class="muted"></span>
-            <span id="retranscribe-status" class="muted"></span>
-          </div>
-        </div>
       </div>
     </section>
 
@@ -105,7 +68,7 @@
     <section class="panel history-results-panel" id="results-panel" style="display:none">
       <div class="panel-header row-between">
         <h2>Результаты <span id="results-count" class="muted"></span></h2>
-        <button id="copy-json-btn" class="ghost">Скопировать JSON</button>
+        <button id="copy-text-btn" class="ghost">Скопировать текст</button>
       </div>
       <div id="results-list" class="history-results-list"></div>
     </section>
