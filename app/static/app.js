@@ -259,7 +259,7 @@ function setupModelSelector(groups, currentModel) {
 
 async function loadConfigAndDevices() {
   const [cfgRes, devRes, modRes] = await Promise.all([
-    api('/api/config'), api('/api/devices'), api('/api/models'),
+    api('/api/config'), api('/api/devices'), api('/api/models/status'),
   ]);
   const cfg = cfgRes.config, devices = devRes.devices;
   const fill = (sel, selected) => {
@@ -307,14 +307,14 @@ async function refreshState() {
       ['Хранить суток', state.archive?.retention_days ?? '—'],
       ['Архив mic.wav', fmtBytes(state.archive?.files?.mic)],
       ['Архив remote.wav', fmtBytes(state.archive?.files?.remote)],
-      ['Фраз всего', session['фраз_всего']],
-      ['Слов всего', session['слов_всего']],
-      ['Слов/час mic', session['слов_за_час'].mic],
-      ['Слов/час remote', session['слов_за_час'].remote],
-      ['Последняя запись', session['последняя_запись']],
-      ['mic.jsonl', fmtBytes(session['размер_логов'].mic)],
-      ['remote.jsonl', fmtBytes(session['размер_логов'].remote)],
-      ['combined.jsonl', fmtBytes(session['размер_логов'].combined)],
+      ['Фраз всего', session.total_utterances],
+      ['Слов всего', session.total_words],
+      ['Слов/час mic', session.words_per_hour.mic],
+      ['Слов/час remote', session.words_per_hour.remote],
+      ['Последняя запись', session.last_write_at],
+      ['mic.jsonl', fmtBytes(session.log_sizes.mic)],
+      ['remote.jsonl', fmtBytes(session.log_sizes.remote)],
+      ['combined.jsonl', fmtBytes(session.log_sizes.combined)],
       ['Ошибка', session.server_error || '—', session.server_error ? 'bad' : '']
     ]);
     kv($('#system-metrics'), [

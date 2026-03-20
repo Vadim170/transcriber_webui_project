@@ -1,11 +1,14 @@
 import json
 import io
+import secrets
 import wave
+from collections.abc import Iterator
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-from flask import Flask, jsonify, redirect, render_template, request, send_file, session, url_for
-from werkzeug.security import check_password_hash, generate_password_hash
+from flask import Flask, Response, jsonify, redirect, render_template, request, send_file, session, url_for
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 from .backends import KNOWN_MODELS
 from .config import WHISPER_CPP_MODELS, load_or_create_config, save_config
@@ -26,7 +29,7 @@ from .transcriber import (
 from .backends import preflight_backend
 
 
-def _read_combined(out_dir: Path):
+def _read_combined(out_dir: Path) -> Iterator[dict]:
     """Yield parsed utterance dicts from combined.jsonl."""
     path = Path(out_dir) / "combined.jsonl"
     if not path.exists():
@@ -121,16 +124,12 @@ def create_app():
     project_root = Path(__file__).resolve().parent.parent
     cfg = load_or_create_config(project_root)
 
-    # Migrate plain password to hash on first run.
-    if not str(cfg["password"]).startswith("pbkdf2:") and not str(cfg["password"]).startswith("scrypt:"):
-        plain = cfg["password"]
-        cfg["password"] = generate_password_hash(plain)
-        save_config(cfg["config_path"], cfg)
-        cfg["_generated_password"] = cfg.get("_generated_password") or plain
-
     app = Flask(__name__, template_folder="templates", static_folder="static")
     app.secret_key = cfg["secret_key"]
+    app.config["SESSION_COOKIE_SAMESITE"] = "Strict"
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["APP_CFG"] = cfg
+    limiter = Limiter(get_remote_address, app=app, default_limits=[], storage_uri="memory://")
     model_manager = ModelManager()
     controller = TranscriberController(model_manager=model_manager)
     retranscribe_manager = RetranscribeJobManager(controller=controller)
@@ -154,9 +153,10 @@ def create_app():
         return render_template("login.html")
 
     @app.post("/api/login")
+    @limiter.limit("10 per minute")
     def api_login():
         password = (request.json or {}).get("password", "")
-        if check_password_hash(app.config["APP_CFG"]["password"], password):
+        if secrets.compare_digest(str(app.config["APP_CFG"]["password"]), password):
             session["ok"] = True
             return jsonify({"ok": True})
         return jsonify({"ok": False, "error": "Неверный пароль."}), 401
@@ -166,7 +166,7 @@ def create_app():
         session.clear()
         return jsonify({"ok": True})
 
-    def guard():
+    def guard() -> Response | None:
         if not logged_in():
             return jsonify({"ok": False, "error": "Не авторизован."}), 401
         return None
@@ -177,19 +177,6 @@ def create_app():
         if deny:
             return deny
         return jsonify({"ok": True, "devices": list_input_devices()})
-
-    @app.get("/api/models")
-    def api_models():
-        deny = guard()
-        if deny:
-            return deny
-        groups = app.config["MODEL_MANAGER"].ui_groups()
-        for group in groups:
-            for model in group["models"]:
-                available, error = preflight_backend(model["id"], "none")
-                model["available"] = available
-                model["error"] = error
-        return jsonify({"ok": True, "groups": groups})
 
     @app.get("/api/models/status")
     def api_models_status():

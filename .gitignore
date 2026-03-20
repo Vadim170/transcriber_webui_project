@@ -45,8 +45,12 @@ models/
 # Transcripts output
 transcripts/
 
-# config overrides (keep config.json.example if needed)
+# config.json contains secrets — never commit it; use config.json.example as template
+config.json
 config.local.json
+
+# audio archive may contain personal recordings
+audio_archive/
 
 # Test artifacts
 .pytest_cache/

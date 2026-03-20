@@ -549,12 +549,6 @@ def _hf_model_kwargs(torch_module, quantization: str) -> dict:
 
 def detect_backend_key(model_text: str) -> str:
     """Return the backend key for *model_text*."""
-    if (
-        model_text == "nvidia/parakeet-tdt-0.6b-v3"
-        and platform.system() == "Darwin"
-        and platform.machine() == "arm64"
-    ):
-        return "macos_parakeet"
     if model_text in KNOWN_MODELS:
         return KNOWN_MODELS[model_text]["backend"]
     return "whisper_cpp"
