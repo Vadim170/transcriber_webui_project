@@ -10,7 +10,7 @@ DEFAULT_CONFIG = {
     "secret_key": None,
     "mic_device": None,
     "remote_device": None,
-    "model": "large-v3-turbo-q5_0",
+    "model": "FluidInference/parakeet-tdt-0.6b-v3-coreml",
     "quantization": "none",
     "threads": 6,
     "out_dir": "./transcripts",

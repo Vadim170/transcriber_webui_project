@@ -21,68 +21,12 @@ TARGET_SAMPLE_RATE = 16000
 QUANTIZATION_MODES = ("none", "4bit", "8bit")
 
 KNOWN_MODELS: dict[str, dict] = {
-    "mistralai/Voxtral-Mini-3B-2507": {
-        "backend": "voxtral",
-        "label": "Voxtral Mini 3B",
-        "size": "~6 GB",
-        "note": "transformers · torch · accelerate",
-        "quantization": ["none", "4bit", "8bit"],
-    },
-    "mistralai/Voxtral-Small-24B-2507": {
-        "backend": "voxtral",
-        "label": "Voxtral Small 24B",
-        "size": "~48 GB",
-        "note": "transformers · torch · accelerate",
-        "quantization": ["none", "4bit", "8bit"],
-    },
-    "nvidia/canary-1b-v2": {
-        "backend": "nemo_asr",
-        "label": "NVIDIA Canary 1B v2",
-        "size": "~2 GB",
-        "note": "NeMo ASR · multilingual",
-        "quantization": ["none"],
-    },
-    "nvidia/parakeet-tdt-1.1b": {
-        "backend": "nemo_asr",
-        "label": "NVIDIA Parakeet TDT 1.1B",
-        "size": "~4.4 GB",
-        "note": "NeMo ASR · English",
-        "quantization": ["none"],
-    },
-    "nvidia/parakeet-tdt-0.6b-v2": {
-        "backend": "nemo_asr",
-        "label": "NVIDIA Parakeet TDT 0.6B v2",
-        "size": "~2.5 GB",
-        "note": "NeMo ASR · English",
-        "quantization": ["none"],
-    },
-    "nvidia/parakeet-tdt-0.6b-v3": {
-        "backend": "nemo_asr",
-        "label": "NVIDIA Parakeet TDT 0.6B v3",
-        "size": "~2.5 GB",
-        "note": "NeMo ASR · multilingual",
-        "quantization": ["none"],
-    },
     "FluidInference/parakeet-tdt-0.6b-v3-coreml": {
         "backend": "macos_parakeet",
         "label": "Parakeet TDT 0.6B v3 CoreML",
         "size": "~2.5 GB",
         "note": "macOS fast path · Apple Silicon",
         "quantization": ["none"],
-    },
-    "Qwen/Qwen3-ASR-1.7B": {
-        "backend": "qwen_asr",
-        "label": "Qwen3-ASR 1.7B",
-        "size": "~3.4 GB",
-        "note": "qwen-asr · torch",
-        "quantization": ["none", "4bit", "8bit"],
-    },
-    "Qwen/Qwen3-ASR-0.6B": {
-        "backend": "qwen_asr",
-        "label": "Qwen3-ASR 0.6B",
-        "size": "~1.2 GB",
-        "note": "qwen-asr · torch",
-        "quantization": ["none", "4bit", "8bit"],
     },
 }
 

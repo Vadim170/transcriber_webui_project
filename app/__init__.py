@@ -276,4 +276,66 @@ def create_app():
             "current": current,
         })
 
+    @app.get("/api/transcriptions")
+    def api_transcriptions():
+        deny = guard()
+        if deny:
+            return deny
+        from_str = request.args.get("from", "")
+        to_str = request.args.get("to", "")
+        if not from_str or not to_str:
+            return jsonify({"ok": False, "error": "Параметры 'from' и 'to' обязательны."}), 400
+        try:
+            from_dt = _parse_dt(from_str)
+            to_dt = _parse_dt(to_str)
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": f"Неверный формат даты: {exc}"}), 400
+        if from_dt >= to_dt:
+            return jsonify({"ok": False, "error": "'from' должен быть раньше 'to'."}), 400
+        
+        out_dir = Path(app.config["APP_CFG"].get("out_dir", "./transcripts"))
+        combined_path = out_dir / "combined.jsonl"
+        
+        if not combined_path.exists():
+            return jsonify({
+                "ok": True,
+                "from": from_dt.isoformat(),
+                "to": to_dt.isoformat(),
+                "count": 0,
+                "utterances": [],
+            })
+        
+        # Read utterances that fall completely within the time range
+        utterances = []
+        with combined_path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                
+                if rec.get("type") != "utterance":
+                    continue
+                
+                try:
+                    utt_start = _parse_dt(rec["start_at"])
+                    utt_end = _parse_dt(rec["end_at"])
+                except (KeyError, ValueError):
+                    continue
+                
+                # Include only utterances that are completely within the range
+                if utt_start >= from_dt and utt_end <= to_dt:
+                    utterances.append(rec)
+        
+        return jsonify({
+            "ok": True,
+            "from": from_dt.isoformat(),
+            "to": to_dt.isoformat(),
+            "count": len(utterances),
+            "utterances": utterances,
+        })
+
     return app

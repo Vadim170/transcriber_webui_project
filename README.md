@@ -324,6 +324,19 @@ git clone https://github.com/FluidInference/FluidAudio.git vendor/FluidAudio
 rsync -av ./transcripts/ user@remote-host:/path/to/archive/
 ```
 
+## API Documentation
+
+Проект предоставляет REST API для программного доступа к транскрипциям.
+
+Полная документация API доступна в [API.md](API.md).
+
+Основные endpoints:
+
+- `GET /api/transcriptions` - получение отдельных фраз за период
+- `GET /api/intervals` - получение интервалов с агрегированным текстом
+- `GET /api/state` - текущее состояние и метрики
+- `POST /api/start` / `POST /api/stop` - управление транскрибацией
+
 ## Структура проекта
 
 ```text
@@ -331,6 +344,7 @@ transcriber_webui_project/
   run.py
   requirements.txt
   README.md
+  API.md
   scripts/
     setup_macos.py
   app/
