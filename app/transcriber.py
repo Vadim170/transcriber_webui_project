@@ -26,6 +26,7 @@ from .backends import (
     preflight_backend,
 )
 from .config import FALLBACK_MODELS
+from .voice_activity_tracker import init_tracker, log_voice_trigger
 
 # ---------------------------------------------------------------------------
 # Fixed protocol constants
@@ -34,6 +35,7 @@ TARGET_SAMPLE_RATE = 16000
 DTYPE = "int16"
 FRAME_MS = 30
 MIN_TEXT_CHARS = 2
+RMS_SPEECH_THRESHOLD = 0.008
 
 # Internal chunk size for background transcription of long intervals
 _TRANSCRIBE_CHUNK_S = 30.0
@@ -226,6 +228,7 @@ class MetricsStore:
         self.last_write_at = "\u2014"
         self.running = False
         self.loading = False
+        self.stopping = False
         self.model_loaded = False
         self.model_name = ""
         self.out_dir = ""
@@ -245,6 +248,7 @@ class MetricsStore:
             self.server_error = ""
             self.model_name = model_name
             self.out_dir = out_dir
+            self.stopping = False
             self.model_loaded = False
             self.interval_count = 0
             self.total_words = 0
@@ -263,6 +267,8 @@ class MetricsStore:
         with self.lock:
             self.running = running
             self.loading = loading
+            if running:
+                self.stopping = False
 
     def set_model_loaded(self):
         with self.lock:
@@ -274,6 +280,11 @@ class MetricsStore:
             self.server_error = message
             self.loading = False
             self.running = False
+            self.stopping = False
+
+    def set_stopping(self, stopping: bool):
+        with self.lock:
+            self.stopping = stopping
 
     def set_source_config(self, role: str, enabled: bool, device_id: Optional[int], device_name: str):
         with self.lock:
@@ -331,7 +342,7 @@ class MetricsStore:
                     "text": remote_text[:200], "at": iso_now(),
                 })
 
-    def snapshot(self, out_dir: str):
+    def snapshot(self, out_dir: str, current_config: Optional[dict] = None):
         with self.lock:
             process_cpu = process_rss = thread_count = None
             system_cpu = system_mem = None
@@ -346,17 +357,22 @@ class MetricsStore:
                     pass
 
             intervals_file = Path(out_dir) / "intervals.jsonl"
+            interval_cfg = _interval_cfg(current_config or {})
             return {
                 "session": {
                     "started_at": self.started_at,
                     "running": self.running,
                     "loading": self.loading,
+                    "stopping": self.stopping,
                     "model_loaded": self.model_loaded,
                     "server_error": self.server_error,
                     "last_write_at": self.last_write_at,
                     "total_words": self.total_words,
                     "total_intervals": self.interval_count,
                     "intervals_file_size": file_size(intervals_file),
+                    "min_interval_s": interval_cfg["min_interval_s"],
+                    "max_interval_s": interval_cfg["max_interval_s"],
+                    "silence_cut_ms": interval_cfg["silence_cut_ms"],
                 },
                 "sources": {k: asdict(v) for k, v in self.sources.items()},
                 "last_interval": {
@@ -551,6 +567,9 @@ class AudioStreamWorker(threading.Thread):
         self._partial_buf = np.zeros(0, dtype=np.int16)
         # Growing buffer of 16kHz mono int16 samples for current interval
         self._audio_buffer: list[np.ndarray] = []
+        self._speech_flags: list[bool] = []
+        self._speech_vad_flags: list[bool] = []
+        self._speech_rms_flags: list[bool] = []
         self._buffer_lock = threading.Lock()
         self.coordinator.register_channel(role)
         self.metrics.update_source(self.role, status="ready")
@@ -610,15 +629,18 @@ class AudioStreamWorker(threading.Thread):
         now_mono = time.monotonic()
         # Silence detection: VAD + RMS fallback
         try:
-            is_speech = self.vad.is_speech(mono16.tobytes(), TARGET_SAMPLE_RATE)
+            vad_speech = self.vad.is_speech(mono16.tobytes(), TARGET_SAMPLE_RATE)
         except Exception:
-            is_speech = False
-        if not is_speech and self._frame_rms(mono16) >= 0.008:
-            is_speech = True
+            vad_speech = False
+        rms_speech = (not vad_speech) and self._frame_rms(mono16) >= RMS_SPEECH_THRESHOLD
+        is_speech = vad_speech or rms_speech
         is_silent = not is_speech
 
         with self._buffer_lock:
             self._audio_buffer.append(mono16.copy())
+            self._speech_flags.append(bool(is_speech))
+            self._speech_vad_flags.append(bool(vad_speech))
+            self._speech_rms_flags.append(bool(rms_speech))
 
         self.coordinator.report_silence(self.role, is_silent, now_mono)
 
@@ -631,7 +653,11 @@ class AudioStreamWorker(threading.Thread):
             offset = min(sample_offset, len(full))
             completed = full[:offset]
             remainder = full[offset:]
+            frame_offset = min(len(self._speech_flags), int(round(offset / max(1, self.frame_samples))))
             self._audio_buffer = [remainder] if len(remainder) > 0 else []
+            self._speech_flags = self._speech_flags[frame_offset:]
+            self._speech_vad_flags = self._speech_vad_flags[frame_offset:]
+            self._speech_rms_flags = self._speech_rms_flags[frame_offset:]
             return completed
 
     def flush_buffer(self) -> np.ndarray:
@@ -641,7 +667,29 @@ class AudioStreamWorker(threading.Thread):
                 return np.zeros(0, dtype=np.int16)
             full = np.concatenate(self._audio_buffer)
             self._audio_buffer = []
+            self._speech_flags = []
+            self._speech_vad_flags = []
+            self._speech_rms_flags = []
             return full
+
+    def current_speech_frames(self) -> int:
+        with self._buffer_lock:
+            return int(sum(self._speech_flags))
+
+    def current_speech_stats(self) -> dict:
+        with self._buffer_lock:
+            speech_frames = int(sum(self._speech_flags))
+            vad_frames = int(sum(self._speech_vad_flags))
+            rms_frames = int(sum(self._speech_rms_flags))
+        return {
+            "speech_frames": speech_frames,
+            "speech_seconds": round(speech_frames * (FRAME_MS / 1000.0), 1),
+            "vad_frames": vad_frames,
+            "vad_seconds": round(vad_frames * (FRAME_MS / 1000.0), 1),
+            "rms_frames": rms_frames,
+            "rms_seconds": round(rms_frames * (FRAME_MS / 1000.0), 1),
+            "rms_threshold": RMS_SPEECH_THRESHOLD,
+        }
 
     def run(self):
         if not self.enabled:
@@ -745,7 +793,12 @@ class TranscriberController:
     def start(self, config: dict):
         with self.controller_lock:
             if self.runner_thread and self.runner_thread.is_alive():
-                return False, "\u0422\u0440\u0430\u043d\u0441\u043a\u0440\u0438\u0431\u0430\u0446\u0438\u044f \u0443\u0436\u0435 \u0437\u0430\u043f\u0443\u0449\u0435\u043d\u0430."
+                if self.stop_event and self.stop_event.is_set():
+                    self.runner_thread.join(timeout=15)
+                    if self.runner_thread.is_alive():
+                        return False, "\u0418\u0434\u0451\u0442 \u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0430, \u043f\u043e\u0434\u043e\u0436\u0434\u0438\u0442\u0435."
+                else:
+                    return False, "\u0422\u0440\u0430\u043d\u0441\u043a\u0440\u0438\u0431\u0430\u0446\u0438\u044f \u0443\u0436\u0435 \u0437\u0430\u043f\u0443\u0449\u0435\u043d\u0430."
             ok, model_value = model_is_valid(config["model"])
             if not ok:
                 return False, model_value
@@ -769,55 +822,56 @@ class TranscriberController:
         out_dir = Path(cfg["out_dir"]).expanduser()
         self.metrics.reset_for_run(cfg["model"], str(out_dir))
         self.metrics.set_running(True, loading=True)
-        if self.model_manager:
-            self.model_manager.begin(cfg["model"], "start")
         try:
-            backend = create_backend(cfg["model"])
-            backend.load(
-                cfg["model"],
-                n_threads=int(cfg["threads"]),
-                quantization=str(cfg.get("quantization") or "none"),
-            )
-            self.backend = backend
-            self.metrics.set_model_loaded()
-        except Exception as e:
             if self.model_manager:
-                self.model_manager.finish(cfg["model"], str(e))
-            self.metrics.set_server_error(f"\u041e\u0448\u0438\u0431\u043a\u0430 \u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0438 \u043c\u043e\u0434\u0435\u043b\u0438: {e}")
-            return
-        if self.model_manager:
-            self.model_manager.finish(cfg["model"], None)
+                self.model_manager.begin(cfg["model"], "start")
+            try:
+                backend = create_backend(cfg["model"])
+                backend.load(
+                    cfg["model"],
+                    n_threads=int(cfg["threads"]),
+                    quantization=str(cfg.get("quantization") or "none"),
+                )
+                self.backend = backend
+                self.metrics.set_model_loaded()
+            except Exception as e:
+                if self.model_manager:
+                    self.model_manager.finish(cfg["model"], str(e))
+                self.metrics.set_server_error(f"\u041e\u0448\u0438\u0431\u043a\u0430 \u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0438 \u043c\u043e\u0434\u0435\u043b\u0438: {e}")
+                return
+            if self.model_manager:
+                self.model_manager.finish(cfg["model"], None)
 
-        self.stop_event = threading.Event()
-        self.interval_writer = IntervalWriter(out_dir)
-        self.coordinator = IntervalCutCoordinator(icfg)
+            self.stop_event = threading.Event()
+            self.interval_writer = IntervalWriter(out_dir)
+            self.coordinator = IntervalCutCoordinator(icfg)
+            self._bg_queue = queue.Queue(maxsize=64)
 
-        devices = {d["id"]: d["name"] for d in list_input_devices()}
-        self.metrics.set_source_config(
-            "mic", cfg.get("mic_device") is not None,
-            cfg.get("mic_device"), devices.get(cfg.get("mic_device"), "\u2014"),
-        )
-        self.metrics.set_source_config(
-            "remote", cfg.get("remote_device") is not None,
-            cfg.get("remote_device"), devices.get(cfg.get("remote_device"), "\u2014"),
-        )
+            init_tracker(out_dir)
 
-        self.workers = [
-            AudioStreamWorker("mic", cfg.get("mic_device"), self.coordinator, self.metrics, self.stop_event, icfg),
-            AudioStreamWorker("remote", cfg.get("remote_device"), self.coordinator, self.metrics, self.stop_event, icfg),
-        ]
-        for w in self.workers:
-            if w.enabled:
-                w.start()
+            devices = {d["id"]: d["name"] for d in list_input_devices()}
+            self.metrics.set_source_config(
+                "mic", cfg.get("mic_device") is not None,
+                cfg.get("mic_device"), devices.get(cfg.get("mic_device"), "\u2014"),
+            )
+            self.metrics.set_source_config(
+                "remote", cfg.get("remote_device") is not None,
+                cfg.get("remote_device"), devices.get(cfg.get("remote_device"), "\u2014"),
+            )
 
-        # Start background transcription thread
-        self._bg_thread = threading.Thread(target=self._background_transcribe_worker, daemon=True)
-        self._bg_thread.start()
+            self.workers = [
+                AudioStreamWorker("mic", cfg.get("mic_device"), self.coordinator, self.metrics, self.stop_event, icfg),
+                AudioStreamWorker("remote", cfg.get("remote_device"), self.coordinator, self.metrics, self.stop_event, icfg),
+            ]
+            for w in self.workers:
+                if w.enabled:
+                    w.start()
 
-        try:
+            self._bg_thread = threading.Thread(target=self._background_transcribe_worker, daemon=True)
+            self._bg_thread.start()
+
             while not self.stop_event.is_set():
                 time.sleep(0.1)
-                # Check for interval cuts
                 cut = self.coordinator.check_cut()
                 if cut is not None:
                     sample_offset, start_dt, end_dt = cut
@@ -827,25 +881,32 @@ class TranscriberController:
                             audio_chunks[w.role] = w.split_buffer(sample_offset)
                     self._bg_queue.put((start_dt, end_dt, audio_chunks))
         finally:
-            # Graceful stop: flush current interval
             flush = self.coordinator.flush_current() if self.coordinator else None
-            if flush:
+            if flush and self.backend is not None:
                 sample_offset, start_dt, end_dt = flush
                 audio_chunks = {}
                 for w in self.workers:
                     if w.enabled:
                         audio_chunks[w.role] = w.split_buffer(sample_offset)
-                # Transcribe synchronously on stop
                 self._transcribe_interval(start_dt, end_dt, audio_chunks)
-            # Signal workers to stop
             for w in self.workers:
                 if w.enabled:
                     w.join(timeout=180)
-            # Stop background thread
-            self._bg_queue.put(None)
+            try:
+                self._bg_queue.put_nowait(None)
+            except queue.Full:
+                pass
             if self._bg_thread:
                 self._bg_thread.join(timeout=120)
+            self.workers = []
+            self.coordinator = None
+            self.interval_writer = None
+            self.backend = None
+            self._bg_thread = None
+            self.stop_event = None
             self.metrics.set_running(False, loading=False)
+            self.metrics.set_stopping(False)
+            self.runner_thread = None
 
     def _background_transcribe_worker(self):
         """Drain bg_queue and transcribe intervals."""
@@ -904,6 +965,12 @@ class TranscriberController:
         mic_words = results.get("mic", {}).get("words", 0)
         remote_words = results.get("remote", {}).get("words", 0)
 
+        # Log voice triggers
+        if mic_words > 0:
+            log_voice_trigger("mic", start_dt)
+        if remote_words > 0:
+            log_voice_trigger("remote", start_dt)
+
         record = {
             "type": "interval",
             "start_at": start_dt.isoformat(timespec="seconds"),
@@ -921,15 +988,37 @@ class TranscriberController:
 
     def stop(self):
         with self.controller_lock:
-            if self.stop_event:
+            if self.stop_event and not self.stop_event.is_set():
+                self.metrics.set_stopping(True)
                 self.stop_event.set()
-            return True, "\u041e\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0430 \u0437\u0430\u043f\u0440\u043e\u0448\u0435\u043d\u0430."
+                return True, "\u041e\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0430 \u0437\u0430\u043f\u0440\u043e\u0448\u0435\u043d\u0430."
+            return False, "\u0422\u0440\u0430\u043d\u0441\u043a\u0440\u0438\u0431\u0430\u0446\u0438\u044f \u0443\u0436\u0435 \u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430."
 
     def get_current_interval(self) -> Optional[dict]:
         if self.coordinator and self.metrics.running:
-            return self.coordinator.current_interval_info()
+            info = self.coordinator.current_interval_info()
+            speech_frames = 0
+            speech_by_channel = {}
+            vad_frames = 0
+            rms_frames = 0
+            for worker in self.workers:
+                if worker.enabled:
+                    stats = worker.current_speech_stats()
+                    speech_by_channel[worker.role] = stats
+                    speech_frames += stats["speech_frames"]
+                    vad_frames += stats["vad_frames"]
+                    rms_frames += stats["rms_frames"]
+            info["speech_frames_count"] = speech_frames
+            info["speech_seconds"] = round(speech_frames * (FRAME_MS / 1000.0), 1)
+            info["vad_frames_count"] = vad_frames
+            info["vad_seconds"] = round(vad_frames * (FRAME_MS / 1000.0), 1)
+            info["rms_frames_count"] = rms_frames
+            info["rms_seconds"] = round(rms_frames * (FRAME_MS / 1000.0), 1)
+            info["rms_threshold"] = RMS_SPEECH_THRESHOLD
+            info["speech_by_channel"] = speech_by_channel
+            return info
         return None
 
     def state(self):
         out_dir = self.current_config.get("out_dir", "./transcripts")
-        return self.metrics.snapshot(str(Path(out_dir).expanduser()))
+        return self.metrics.snapshot(str(Path(out_dir).expanduser()), current_config=self.current_config)

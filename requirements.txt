@@ -7,6 +7,7 @@ pywhispercpp>=1.4.1
 webrtcvad-wheels>=2.0.14
 psutil>=7.0
 flask-limiter>=3.5
+flask-socketio>=5.3
 
 # ---- optional backends ----
 # Install only what you need:

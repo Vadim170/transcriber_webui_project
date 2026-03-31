@@ -15,6 +15,7 @@
       </div>
       <div class="top-actions">
         <span id="server-status" class="pill">offline</span>
+        <button id="models-btn" class="ghost">Модели</button>
         <a href="/history" class="ghost-link">История</a>
         <button id="logout-btn" class="ghost">Выйти</button>
       </div>
@@ -70,24 +71,16 @@
       </div>
       <div class="button-row">
         <button id="save-config-btn" class="ghost">Сохранить настройки</button>
-        <button id="start-btn">Запустить</button>
-        <button id="stop-btn" class="danger">Остановить</button>
+        <button id="toggle-btn">Запустить</button>
         <span id="action-result" class="muted"></span>
       </div>
-    </section>
-
-    <section class="panel">
-      <div class="panel-header row-between">
-        <h2>Модели</h2>
-        <span id="models-summary" class="muted"></span>
-      </div>
-      <div id="models-list" class="logs"></div>
     </section>
 
     <section class="cards-grid">
       <article class="panel compact">
         <h3>Сессия</h3>
         <div id="session-metrics" class="kv-grid"></div>
+        <div id="session-progress" class="session-progress-card"></div>
       </article>
       <article class="panel compact">
         <h3>Система</h3>
@@ -141,13 +134,31 @@
         </div>
       </article>
       <article class="panel">
-        <h3>Последний интервал</h3>
+        <h3>Интервалы за последний час</h3>
         <div id="last-interval" class="logs">
-          <div class="muted">Пока нет интервалов</div>
+          <div class="muted">Пока нет интервалов за последний час</div>
         </div>
       </article>
     </section>
   </div>
+
+  <!-- Models Modal -->
+  <div id="models-modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Управление моделями</h2>
+        <button class="modal-close" id="models-modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="panel-header row-between" style="margin-bottom:12px">
+          <span id="models-summary" class="muted"></span>
+        </div>
+        <div id="models-list" class="logs"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>

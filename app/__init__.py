@@ -1,11 +1,14 @@
 import json
 import secrets
+import threading
+import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, redirect, render_template, request, session, url_for
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from flask_socketio import SocketIO, emit
 
 from .backends import KNOWN_MODELS
 from .config import WHISPER_CPP_MODELS, load_or_create_config, save_config
@@ -18,6 +21,8 @@ from .transcriber import (
     list_input_devices,
 )
 from .backends import preflight_backend
+
+socketio = SocketIO(async_mode="threading")
 
 
 def _parse_dt(value: str) -> datetime:
@@ -48,6 +53,27 @@ def _read_intervals(out_dir: Path) -> list[dict]:
     return records
 
 
+def _build_state_payload(controller: TranscriberController) -> dict:
+    state = controller.state()
+    state["current_interval"] = controller.get_current_interval()
+    return {"state": state}
+
+
+def _build_overview_payload(controller: TranscriberController, out_dir: str) -> dict:
+    all_intervals = _read_intervals(out_dir)
+    overview = []
+    for rec in all_intervals:
+        overview.append({
+            "start_at": rec.get("start_at"),
+            "end_at": rec.get("end_at"),
+            "duration_s": rec.get("duration_s"),
+        })
+    return {
+        "intervals": overview,
+        "current": controller.get_current_interval(),
+    }
+
+
 def create_app():
     project_root = Path(__file__).resolve().parent.parent
     cfg = load_or_create_config(project_root)
@@ -57,6 +83,7 @@ def create_app():
     app.config["SESSION_COOKIE_SAMESITE"] = "Strict"
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["APP_CFG"] = cfg
+    socketio.init_app(app)
     limiter = Limiter(get_remote_address, app=app, default_limits=[], storage_uri="memory://")
     model_manager = ModelManager()
     controller = TranscriberController(model_manager=model_manager)
@@ -65,6 +92,21 @@ def create_app():
 
     def logged_in() -> bool:
         return bool(session.get("ok"))
+
+    @socketio.on("connect")
+    def handle_socket_connect():
+        if not logged_in():
+            return False
+        emit("state_update", _build_state_payload(controller))
+        out_dir = controller.current_config.get("out_dir") or app.config["APP_CFG"].get("out_dir", "./transcripts")
+        emit("overview_update", _build_overview_payload(controller, out_dir))
+
+    def _socket_state_emitter():
+        while True:
+            time.sleep(1.0)
+            out_dir = controller.current_config.get("out_dir") or app.config["APP_CFG"].get("out_dir", "./transcripts")
+            socketio.emit("state_update", _build_state_payload(controller), namespace="/")
+            socketio.emit("overview_update", _build_overview_payload(controller, out_dir), namespace="/")
 
     @app.get("/")
     def index():
@@ -205,9 +247,7 @@ def create_app():
         deny = guard()
         if deny:
             return deny
-        state = controller.state()
-        state["current_interval"] = controller.get_current_interval()
-        return jsonify({"ok": True, "state": state})
+        return jsonify({"ok": True, **_build_state_payload(controller)})
 
     @app.get("/history")
     def history_page():
@@ -233,7 +273,7 @@ def create_app():
             return jsonify({"ok": False, "error": f"Неверный формат даты: {exc}"}), 400
         if from_dt >= to_dt:
             return jsonify({"ok": False, "error": "'from' должен быть раньше 'to'."}), 400
-        out_dir = app.config["APP_CFG"].get("out_dir", "./transcripts")
+        out_dir = controller.current_config.get("out_dir") or app.config["APP_CFG"].get("out_dir", "./transcripts")
         all_intervals = _read_intervals(out_dir)
         # Return all intervals that overlap the range (full interval even if partial overlap)
         result = []
@@ -259,22 +299,8 @@ def create_app():
         deny = guard()
         if deny:
             return deny
-        out_dir = app.config["APP_CFG"].get("out_dir", "./transcripts")
-        all_intervals = _read_intervals(out_dir)
-        # Lightweight list without text
-        overview = []
-        for rec in all_intervals:
-            overview.append({
-                "start_at": rec.get("start_at"),
-                "end_at": rec.get("end_at"),
-                "duration_s": rec.get("duration_s"),
-            })
-        current = controller.get_current_interval()
-        return jsonify({
-            "ok": True,
-            "intervals": overview,
-            "current": current,
-        })
+        out_dir = controller.current_config.get("out_dir") or app.config["APP_CFG"].get("out_dir", "./transcripts")
+        return jsonify({"ok": True, **_build_overview_payload(controller, out_dir)})
 
     @app.get("/api/transcriptions")
     def api_transcriptions():
@@ -293,7 +319,7 @@ def create_app():
         if from_dt >= to_dt:
             return jsonify({"ok": False, "error": "'from' должен быть раньше 'to'."}), 400
         
-        out_dir = Path(app.config["APP_CFG"].get("out_dir", "./transcripts"))
+        out_dir = Path(controller.current_config.get("out_dir") or app.config["APP_CFG"].get("out_dir", "./transcripts"))
         combined_path = out_dir / "combined.jsonl"
         
         if not combined_path.exists():
@@ -337,5 +363,36 @@ def create_app():
             "count": len(utterances),
             "utterances": utterances,
         })
+    
+    @app.get("/api/voice-activity")
+    def api_voice_activity():
+        """Get voice activity statistics (trigger counts by hour/day)."""
+        deny = guard()
+        if deny:
+            return deny
+        
+        from .voice_activity_tracker import get_tracker
+        tracker = get_tracker()
+        
+        if not tracker:
+            return jsonify({"ok": False, "error": "Трекер не инициализирован."}), 500
+        
+        stat_type = request.args.get("type", "hourly")  # 'hourly' or 'daily'
+        from_str = request.args.get("from", "")
+        to_str = request.args.get("to", "")
+        
+        date_from = from_str if from_str else None
+        date_to = to_str if to_str else None
+        
+        if stat_type == "daily":
+            stats = tracker.get_daily_stats(date_from, date_to)
+        else:
+            stats = tracker.get_hourly_stats(date_from, date_to)
+        
+        return jsonify({"ok": True, **stats})
+
+    if not app.config.get("_SOCKETIO_STATE_TASK_STARTED"):
+        threading.Thread(target=_socket_state_emitter, daemon=True).start()
+        app.config["_SOCKETIO_STATE_TASK_STARTED"] = True
 
     return app

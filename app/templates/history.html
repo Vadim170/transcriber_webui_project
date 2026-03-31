@@ -19,61 +19,76 @@
       </div>
     </header>
 
-    <!-- Timeline chart -->
-    <section class="panel history-overview-panel">
-      <div class="panel-header row-between">
-        <h2>Таймлайн интервалов</h2>
-        <div class="legend-row">
-          <span class="legend-dot" style="background:#7c9cff"></span><span class="muted">транскрибировано</span>
-          <span class="legend-dot" style="background:#f1c40f"></span><span class="muted">запись</span>
+    <!-- Timeline & Voice Activity -->
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Таймлайн за 7 дней</h2>
+      </div>
+      <div class="history-toolbar">
+        <div class="history-toolbar-copy">
+          <strong>Недельный обзор</strong>
+          <span class="muted">Выделяйте диапазон на таймлайне или используйте быстрый выбор ниже</span>
         </div>
+        <div id="timeline-window-label" class="history-window-pill muted"></div>
       </div>
       <div id="timeline-chart" class="overview-chart">
         <div class="muted" style="text-align:center;padding:40px 0">Загрузка…</div>
       </div>
       <div class="overview-hint muted">Перетащите по таймлайну для выбора диапазона · Нажмите на интервал для просмотра</div>
+      <div id="voice-activity-chart" class="chart" style="min-height:200px;margin-top:16px"></div>
     </section>
 
     <!-- Range controls -->
-    <section class="panel history-controls-panel">
+    <section class="panel history-controls-panel" style="margin-top:16px">
       <h2>Диапазон</h2>
       <div class="range-controls">
+        <div class="history-quick-grid">
+          <button class="ghost preset-btn quick-action-btn" data-preset="last-hour">Последний час</button>
+          <button class="ghost preset-btn quick-action-btn" data-preset="previous-hour">Предыдущий час</button>
+          <button class="ghost preset-btn quick-action-btn" data-preset="today">Сегодня</button>
+          <button class="ghost preset-btn quick-action-btn" data-preset="yesterday">Вчера</button>
+        </div>
         <div class="range-inputs">
           <div>
             <label>От</label>
             <input type="datetime-local" id="range-from" step="1">
+            <div class="shift-row">
+              <button class="ghost shift-from-btn" data-minutes="-15">-15 мин</button>
+              <button class="ghost shift-from-btn" data-minutes="-5">-5 мин</button>
+              <button class="ghost shift-from-btn" data-minutes="5">+5 мин</button>
+              <button class="ghost shift-from-btn" data-minutes="15">+15 мин</button>
+            </div>
           </div>
           <div class="range-sep muted">—</div>
           <div>
-            <label>До</label>
+            <label>До <span class="muted">(<span id="range-duration-label">—</span>)</span></label>
             <input type="datetime-local" id="range-to" step="1">
+            <div class="shift-row">
+              <button class="ghost shift-to-btn" data-minutes="-15">-15 мин</button>
+              <button class="ghost shift-to-btn" data-minutes="-5">-5 мин</button>
+              <button class="ghost shift-to-btn" data-minutes="5">+5 мин</button>
+              <button class="ghost shift-to-btn" data-minutes="15">+15 мин</button>
+            </div>
           </div>
-        </div>
-        <div class="preset-row">
-          <button class="ghost preset-btn" data-preset="5m">5 мин</button>
-          <button class="ghost preset-btn" data-preset="15m">15 мин</button>
-          <button class="ghost preset-btn" data-preset="1h">1 час</button>
-          <button class="ghost preset-btn" data-preset="4h">4 часа</button>
-          <button class="ghost preset-btn" data-preset="today">Сегодня</button>
-          <button class="ghost preset-btn" data-preset="yesterday">Вчера</button>
-        </div>
-        <div class="load-row">
-          <button id="load-btn">Загрузить</button>
-          <span id="range-status" class="muted"></span>
         </div>
       </div>
     </section>
 
     <!-- Results -->
-    <section class="panel history-results-panel" id="results-panel" style="display:none">
+    <section class="panel history-results-panel" id="results-panel">
       <div class="panel-header row-between">
         <h2>Результаты <span id="results-count" class="muted"></span></h2>
-        <button id="copy-text-btn" class="ghost">Скопировать текст</button>
+        <div class="results-actions">
+          <span id="range-status" class="muted"></span>
+          <button id="load-btn" class="ghost" style="display:none">Загрузить</button>
+          <button id="copy-text-btn" class="ghost">Скопировать текст</button>
+        </div>
       </div>
       <div id="results-list" class="history-results-list"></div>
     </section>
   </div>
 
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="{{ url_for('static', filename='history.js') }}"></script>
 </body>
 </html>
