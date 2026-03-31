@@ -49,6 +49,8 @@ def _read_intervals(out_dir: Path) -> list[dict]:
             except json.JSONDecodeError:
                 continue
             if rec.get("type") == "interval":
+                rec["mic_words"] = int(rec.get("mic_words") or 0)
+                rec["remote_words"] = int(rec.get("remote_words") or 0)
                 records.append(rec)
     return records
 
@@ -67,6 +69,8 @@ def _build_overview_payload(controller: TranscriberController, out_dir: str) -> 
             "start_at": rec.get("start_at"),
             "end_at": rec.get("end_at"),
             "duration_s": rec.get("duration_s"),
+            "mic_words": rec.get("mic_words", 0),
+            "remote_words": rec.get("remote_words", 0),
         })
     return {
         "intervals": overview,

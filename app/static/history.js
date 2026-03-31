@@ -9,7 +9,6 @@ let brushAnchorMs = null;
 let intervalsData = [];
 let currentInterval = null;
 let overviewSocket = null;
-let voiceActivityData = null;
 let lastLoadedRangeKey = null;
 let loadInFlight = false;
 
@@ -19,7 +18,6 @@ const CHART_PAD_R = 16;
 const CHART_PAD_T = 12;
 const CHART_PAD_B = 28;
 const WEEK_MS = 7 * 24 * 3600 * 1000;
-const GAP_BREAK_MULTIPLIER = 3;
 const AUTO_LOAD_MAX_MS = 24 * 3600 * 1000;
 
 function esc(s) {
@@ -483,84 +481,96 @@ async function refreshOverview(showErrors = false) {
 
 function connectOverviewSocket() {
   overviewSocket = io();
-  overviewSocket.on('overview_update', async (payload) => {
+  overviewSocket.on('overview_update', (payload) => {
     if (!payload || brushDragging) return;
     applyOverviewData(payload);
-    await loadVoiceActivity();
   });
 }
 
-async function loadVoiceActivity() {
-  if (!chartWindowStart || !chartWindowEnd) return;
-  const from = toLocalDateISO(new Date(chartWindowStart));
-  const to = toLocalDateISO(new Date(chartWindowEnd));
-  try {
-    const data = await api(`/api/voice-activity?type=hourly&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
-    voiceActivityData = data;
-    renderVoiceActivityChart();
-  } catch (e) {
-    console.error('Failed to load voice activity:', e);
-  }
+function intervalWordValue(interval, key) {
+  const value = Number(interval?.[key] || 0);
+  return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
-function buildLineSegments(series, key, bucketMs, innerW, yFn) {
-  const activePoints = series
-    .filter((point) => point[key] > 0)
-    .map((point) => ({ ...point, x: tsToX(point.ts, innerW), y: yFn(point[key]) }));
-  if (!activePoints.length) return { polylines: [], circles: [] };
+function buildWordSeries(intervals, key, innerW, yFn, color) {
+  return intervals
+    .map((interval) => {
+      const words = intervalWordValue(interval, key);
+      if (!words) return '';
+      const startMs = Math.max(chartWindowStart, new Date(interval.start_at).getTime());
+      const endMs = Math.min(chartWindowEnd, new Date(interval.end_at).getTime());
+      if (endMs <= startMs) return '';
+      const x1 = tsToX(startMs, innerW);
+      const x2 = Math.max(x1 + 2, tsToX(endMs, innerW));
+      const y = yFn(words);
+      const title = `${new Date(interval.start_at).toLocaleString('ru-RU')} - ${new Date(interval.end_at).toLocaleString('ru-RU')} · mic ${intervalWordValue(interval, 'mic_words')} · remote ${intervalWordValue(interval, 'remote_words')}`;
+      return `
+        <g>
+          <title>${esc(title)}</title>
+          <line x1="${x1.toFixed(1)}" y1="${y.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y.toFixed(1)}" stroke="${color}" stroke-width="3" stroke-linecap="round" opacity="0.92"/>
+          <circle cx="${((x1 + x2) / 2).toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="${color}"/>
+        </g>
+      `;
+    })
+    .join('');
+}
 
-  const maxGapMs = Math.max(bucketMs * GAP_BREAK_MULTIPLIER, 2 * 3600 * 1000);
-  const polylines = [];
-  const circles = [];
-  let current = [];
-
-  activePoints.forEach((point) => {
-    const prev = current[current.length - 1];
-    if (prev && point.ts - prev.ts > maxGapMs) {
-      if (current.length) polylines.push(current);
-      current = [];
-    }
-    current.push(point);
-    circles.push(point);
-  });
-  if (current.length) polylines.push(current);
-  return { polylines, circles };
+function renderCurrentIntervalOverlay(innerH, innerW, height) {
+  if (!currentInterval) return '';
+  const startMs = Math.max(chartWindowStart, new Date(currentInterval.start_at).getTime());
+  const endMs = Math.min(chartWindowEnd, startMs + Number(currentInterval.elapsed_s || 0) * 1000);
+  if (endMs <= startMs) return '';
+  const x1 = tsToX(startMs, innerW);
+  const x2 = Math.max(x1 + 2, tsToX(endMs, innerW));
+  return `
+    <g>
+      <title>Идёт запись: ${fmtDuration(currentInterval.elapsed_s || 0)}. Слова появятся после распознавания интервала.</title>
+      <rect x="${x1.toFixed(1)}" y="18" width="${(x2 - x1).toFixed(1)}" height="${(innerH + 8).toFixed(1)}" rx="8" fill="#f1c40f" opacity="0.18" stroke="#f1c40f" stroke-width="1.2" stroke-dasharray="5 4"/>
+      <line x1="${x1.toFixed(1)}" y1="18" x2="${x1.toFixed(1)}" y2="${(height - 24).toFixed(1)}" stroke="#f1c40f" stroke-width="1" opacity="0.7"/>
+      <line x1="${x2.toFixed(1)}" y1="18" x2="${x2.toFixed(1)}" y2="${(height - 24).toFixed(1)}" stroke="#f1c40f" stroke-width="1" opacity="0.7"/>
+    </g>
+  `;
 }
 
 function renderVoiceActivityChart() {
   const el = $('#voice-activity-chart');
   if (!el) return;
-  if (!voiceActivityData || !voiceActivityData.series) {
-    el.innerHTML = '<div class="chart-empty muted">Активность появится после загрузки недельного окна</div>';
+  if (!chartWindowStart || !chartWindowEnd) {
+    el.innerHTML = '<div class="chart-empty muted">График слов появится после загрузки недельного окна</div>';
     return;
   }
 
-  const series = (voiceActivityData.series || [])
-    .map((item) => ({ ts: new Date(item.ts).getTime(), mic: item.mic || 0, remote: item.remote || 0 }))
-    .filter((item) => item.ts >= chartWindowStart && item.ts <= chartWindowEnd)
-    .sort((a, b) => a.ts - b.ts);
+  const completedIntervals = intervalsData
+    .filter((item) => {
+      const start = new Date(item.start_at).getTime();
+      const end = new Date(item.end_at).getTime();
+      return end > chartWindowStart && start < chartWindowEnd;
+    })
+    .sort((a, b) => new Date(a.start_at) - new Date(b.start_at));
+  const visibleWordIntervals = completedIntervals.filter((item) => (
+    intervalWordValue(item, 'mic_words') > 0 || intervalWordValue(item, 'remote_words') > 0
+  ));
+  const hasCurrent = currentInterval && (new Date(currentInterval.start_at).getTime() < chartWindowEnd);
 
-  if (!series.length || !series.some((item) => item.mic > 0 || item.remote > 0)) {
-    el.innerHTML = '<div class="chart-empty muted">За это окно нет голосовой активности</div>';
+  if (!visibleWordIntervals.length && !hasCurrent) {
+    el.innerHTML = '<div class="chart-empty muted">За это окно нет распознанных интервалов со словами</div>';
     return;
   }
 
-  const VAD_H = 150;
+  const VAD_H = 158;
   const VAD_PAD_T = 18;
   const VAD_PAD_B = 28;
   const VAD_PAD_R = CHART_PAD_R;
   const innerH = VAD_H - VAD_PAD_T - VAD_PAD_B;
   const w = el.clientWidth || 800;
   const innerW = w - CHART_PAD_L - VAD_PAD_R;
-  const bucketMs = voiceActivityData.bucket_ms || 3600 * 1000;
-  const maxVal = Math.max(...series.map((item) => Math.max(item.mic, item.remote)), 1);
+  const maxVal = Math.max(...visibleWordIntervals.map((item) => Math.max(intervalWordValue(item, 'mic_words'), intervalWordValue(item, 'remote_words'))), 1);
+  const totalMic = completedIntervals.reduce((sum, item) => sum + intervalWordValue(item, 'mic_words'), 0);
+  const totalRemote = completedIntervals.reduce((sum, item) => sum + intervalWordValue(item, 'remote_words'), 0);
 
   function valToY(v) {
     return VAD_PAD_T + innerH - (v / maxVal) * innerH;
   }
-
-  const micSegments = buildLineSegments(series, 'mic', bucketMs, innerW, valToY);
-  const remoteSegments = buildLineSegments(series, 'remote', bucketMs, innerW, valToY);
 
   let gridSvg = '';
   const ySteps = 4;
@@ -571,33 +581,33 @@ function renderVoiceActivityChart() {
     gridSvg += `<text x="${CHART_PAD_L - 6}" y="${(y + 4).toFixed(1)}" fill="#97a3c6" font-size="9" text-anchor="end">${v}</text>`;
   }
 
-  const micSvg = micSegments.polylines.map((segment) => (
-    `<polyline points="${segment.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')}" fill="none" stroke="#7c9cff" stroke-width="2.25" stroke-linejoin="round" stroke-linecap="round" opacity="0.88"/>`
-  )).join('');
-  const remoteSvg = remoteSegments.polylines.map((segment) => (
-    `<polyline points="${segment.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')}" fill="none" stroke="#2ecc71" stroke-width="2.25" stroke-linejoin="round" stroke-linecap="round" opacity="0.88"/>`
-  )).join('');
-  const dotSvg = [...micSegments.circles.map((p) => `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2.8" fill="#7c9cff"/>`),
-    ...remoteSegments.circles.map((p) => `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2.8" fill="#2ecc71"/>`),
-  ].join('');
+  const currentSvg = renderCurrentIntervalOverlay(innerH, innerW, VAD_H);
+  const micSvg = buildWordSeries(visibleWordIntervals, 'mic_words', innerW, valToY, '#7c9cff');
+  const remoteSvg = buildWordSeries(visibleWordIntervals, 'remote_words', innerW, valToY, '#2ecc71');
 
   const legendX = w - VAD_PAD_R - 212;
   const legendSvg = `
     <line x1="${legendX}" y1="${VAD_PAD_T + 4}" x2="${legendX + 18}" y2="${VAD_PAD_T + 4}" stroke="#7c9cff" stroke-width="2"/>
-    <text x="${legendX + 24}" y="${VAD_PAD_T + 8}" fill="#e6ebff" font-size="11">Микрофон (${voiceActivityData.total_mic || 0})</text>
+    <text x="${legendX + 24}" y="${VAD_PAD_T + 8}" fill="#e6ebff" font-size="11">Микрофон (${totalMic} слов)</text>
     <line x1="${legendX}" y1="${VAD_PAD_T + 22}" x2="${legendX + 18}" y2="${VAD_PAD_T + 22}" stroke="#2ecc71" stroke-width="2"/>
-    <text x="${legendX + 24}" y="${VAD_PAD_T + 26}" fill="#e6ebff" font-size="11">Системный звук (${voiceActivityData.total_remote || 0})</text>
+    <text x="${legendX + 24}" y="${VAD_PAD_T + 26}" fill="#e6ebff" font-size="11">Системный звук (${totalRemote} слов)</text>
+    <rect x="${legendX}" y="${VAD_PAD_T + 34}" width="18" height="9" rx="3" fill="#f1c40f" opacity="0.18" stroke="#f1c40f" stroke-width="1"/>
+    <text x="${legendX + 24}" y="${VAD_PAD_T + 42}" fill="#e6ebff" font-size="11">Текущий интервал</text>
   `;
 
   const axisSvg = renderTimeAxis(innerH, innerW).replaceAll(`y="${CHART_H - 6}"`, `y="${VAD_H - 6}"`);
+  const hintText = !visibleWordIntervals.length && hasCurrent
+    ? '<text x="50%" y="50%" fill="#97a3c6" font-size="12" text-anchor="middle">Идёт запись. Слова появятся после распознавания интервала.</text>'
+    : '';
   el.innerHTML = `
     <svg viewBox="0 0 ${w} ${VAD_H}" style="width:100%;height:${VAD_H}px;display:block">
       <rect width="${w}" height="${VAD_H}" fill="transparent"/>
       ${gridSvg}
       ${axisSvg}
+      ${currentSvg}
       ${micSvg}
       ${remoteSvg}
-      ${dotSvg}
+      ${hintText}
       ${legendSvg}
     </svg>
   `;
@@ -648,7 +658,6 @@ async function boot() {
   showIdleResultsHint();
   applyPreset('last-hour');
   await refreshOverview(true);
-  await loadVoiceActivity();
   connectOverviewSocket();
   window.addEventListener('resize', () => {
     renderTimeline();

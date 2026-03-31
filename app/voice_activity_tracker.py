@@ -89,7 +89,6 @@ class VoiceActivityTracker:
         if date_to is None:
             date_to = datetime.now().date().isoformat()
         if date_from is None:
-            from datetime import timedelta
             date_from = (datetime.now() - timedelta(days=7)).date().isoformat()
         
         # Фильтруем данные по диапазону
@@ -175,7 +174,6 @@ class VoiceActivityTracker:
         if date_to is None:
             date_to = datetime.now().date().isoformat()
         if date_from is None:
-            from datetime import timedelta
             date_from = (datetime.now() - timedelta(days=30)).date().isoformat()
         
         filtered = [

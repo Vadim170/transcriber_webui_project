@@ -978,6 +978,8 @@ class TranscriberController:
             "duration_s": round(duration_s, 1),
             "mic_text": mic_text,
             "remote_text": remote_text,
+            "mic_words": mic_words,
+            "remote_words": remote_words,
             "mic_language": results.get("mic", {}).get("language", ""),
             "remote_language": results.get("remote", {}).get("language", ""),
         }
